@@ -1,0 +1,62 @@
+<?xml version="1.0" encoding="utf-8"?>
+<executable>
+  <category>Examples</category>
+  <index>0</index>
+  <title>replaceAllCLI</title>
+  <description><![CDATA[Apply a Gaussian blur to an image]]></description>
+  <version>0.1.0.</version>
+  <documentation-url>https://github.com/username/project</documentation-url>
+  <license/>
+  <contributor>Andras Lasso (PerkLab)</contributor>
+  <acknowledgements><![CDATA[This work is part of the National Alliance for Medical Image Computing (NAMIC), funded by the National Institutes of Health through the NIH Roadmap for Medical Research, Grant U54 EB005149.]]></acknowledgements>
+  
+  <parameters>
+
+    <label>IO</label>
+    <description><![CDATA[Input/output parameters]]></description>
+
+    <string>
+      <name>input_folder</name>
+      <label>input_folder</label>
+      <index>0</index>
+      <description>Path to the input folder</description>
+    </string>
+
+    <string>
+      <name>replace</name>
+      <label>replace</label>
+      <index>1</index>
+      <description>Word that will be replaced</description>
+    </string>
+
+    <string>
+      <name>by</name>
+      <label>by</label>
+      <index>2</index>
+      <description>Word that will be replaced by</description>
+    </string>
+
+    <string>
+      <name>output_folder</name>
+      <label>output_folder</label>
+      <index>3</index>
+      <description>Path to the output folder</description>
+    </string>
+
+    <string>
+      <name>overwrite</name>
+      <label>overwrite</label>
+      <index>4</index>
+      <description>Overwrite the input file</description>
+    </string>
+
+    <string>
+      <name>log_path</name>
+      <label>log_path</label>
+      <index>5</index>
+      <description>log_path for the progress bar</description>
+    </string>
+
+    
+  </parameters>
+</executable>
