@@ -60,6 +60,7 @@ def main(args):
                 
 
 if __name__ == "__main__":
+    # Parse arguments
     parser = argparse.ArgumentParser()
 
     parser.add_argument('input_folder',type=str)
