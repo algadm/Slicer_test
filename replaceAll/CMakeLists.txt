@@ -4,7 +4,10 @@ set(MODULE_NAME replaceAll)
 #-----------------------------------------------------------------------------
 set(MODULE_PYTHON_SCRIPTS
   ${MODULE_NAME}.py
-  )
+  replaceAll_utils/__init__.py
+  replaceAll_utils/replaceAll_WSL.py
+  replaceAll_utils/requirement.py
+)
 
 set(MODULE_PYTHON_RESOURCES
   Resources/Icons/${MODULE_NAME}.png

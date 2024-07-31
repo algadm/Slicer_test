@@ -15,9 +15,13 @@ from slicer.parameterNodeWrapper import (
 )
 
 from slicer import vtkMRMLScalarVolumeNode
+from CondaSetUp import CondaSetUpCall,CondaSetUpCallWsl
 
 import qt
 import time
+import platform
+import threading
+import subprocess
 from functools import partial
 
 #
@@ -148,7 +152,7 @@ class replaceAllWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
     def setup(self) -> None:
         """Called when the user opens the module the first time and the widget is initialized."""
         ScriptedLoadableModuleWidget.setup(self)
-
+        self.conda_wsl = CondaSetUpCallWsl()
         # Load widget from .ui file (created by Qt Designer).
         # Additional widgets can be instantiated manually and added to self.layout.
         uiWidget = slicer.util.loadUI(self.resourcePath("UI/replaceAll.ui"))
@@ -298,22 +302,286 @@ class replaceAllWidget(ScriptedLoadableModuleWidget, VTKObservationMixin):
 
     def onApplyButton(self):
         """Run processing when user clicks "Apply" button."""
-        
-        if self._checkIO():
-            # If additional output volume is selected then result with inverted threshold is written there
-            # self.logic.process(self.ui.inputSelector.currentNode(), self.ui.invertedOutputSelector.currentNode(),
-            #                 self.ui.imageThresholdSliderWidget.value, not self.ui.invertOutputCheckBox.checked, showResult=False)
-            
-            self.logic = replaceAllLogic(self.ui.lineEdit_inputFolder.text,
-                                        self.ui.lineEdit_replaceString.text,
-                                        self.ui.lineEdit_replaceByString.text,
-                                        self.ui.lineEdit_outputFolder.text,
-                                        self.ui.checkBox_overwrite.isChecked(),
-                                        self.log_path)
-            self.logic.process()
-            self.addObserver(self.logic.cliNode, vtk.vtkCommand.ModifiedEvent, self.onProcessUpdate)
-            self.onProcessStarted()
+        param = {}
 
+        param["input_folder"] = self.ui.lineEdit_inputFolder.text
+        param["replace"] = self.ui.lineEdit_replaceString.text
+        param["by"] = self.ui.lineEdit_replaceByString.text
+        param["output_folder"] = self.ui.lineEdit_outputFolder.text
+        param["overwrite"] = self.ui.checkBox_overwrite.isChecked()
+        param["log_path"] = self.log_path
+
+        ready = True
+        system = platform.system()
+        if system == "Windows":
+            self.ui.applyButton.setVisible(False)
+            wsl = self.conda_wsl.testWslAvailable()
+            if wsl : # check if wsl is available
+                lib = self.check_lib_wsl()
+                if not lib : # check if the lib required are installed
+                    messageBox = qt.QMessageBox()
+                    text = "Code can't be launch. \nWSL doen't have all the necessary libraries, please download the installer and follow the instructin here : https://github.com/DCBIA-OrthoLab/SlicerAutomatedDentalTools/releases/download/wsl2_windows/installer_wsl2.zip\nDownloading may be blocked by Chrome, this is normal, just authorize it."
+                    ready = False
+                    messageBox.information(None, "Information", text)
+            else :
+                messageBox = qt.QMessageBox()
+                text = "Code can't be launch. \nWSL is not installed, please download the installer and follow the instructin here : https://github.com/DCBIA-OrthoLab/SlicerAutomatedDentalTools/releases/download/wsl2_windows/installer_wsl2.zip\nDownloading may be blocked by Chrome, this is normal, just authorize it."
+                ready = False
+                messageBox.information(None, "Information", text)
+           
+            if ready :
+        
+                if "Error" in self.conda_wsl.condaRunCommand([self.conda_wsl.getCondaExecutable(),"--version"]): # check if miniconda is install in wsl and is setup in SlicerConda
+                    messageBox = qt.QMessageBox()
+                    text = "Code can't be launch. \nConda is not setup in WSL. Please go the extension CondaSetUp in SlicerConda to do it."
+                    ready = False
+                    messageBox.information(None, "Information", text)
+
+            if ready :
+                # self.RunningUIWindows(True) 
+                if not self.conda_wsl.condaTestEnv('replaceAll') : # check if the environnement exist
+                    userResponse = slicer.util.confirmYesNoDisplay("The environnement to rename files doesn't exist, do you want to create it ? ", windowTitle="Env doesn't exist") # ask the persimission to create it
+                    if userResponse : #create it in parallele to not blocking slicer
+                    
+                        process = threading.Thread(target=self.creation_env_wsl, args=())
+                        process.start()
+                        
+                        start_time = time.time()
+                        previous_time = start_time
+                        current_time = start_time
+                        
+                        # self.ui.PredScanLabel.setText(f"The environnement doesn't exist, creation of the environnement")
+                        # self.ui.TimerLabel.setText(f"time: : {current_time-start_time:.2f}s")
+
+                        while process.is_alive():
+                            slicer.app.processEvents()
+                            current_time = time.time()
+                            if current_time - previous_time > 0.3 :
+                                previous_time = current_time
+                                # self.ui.TimerLabel.setText(f"time: : {current_time-start_time:.2f}s")
+
+                    else :
+                        # self.ui.PredScanLabel.setText(f"The environnement doesn't exist, code can't be launch")
+                        ready = False
+                
+                if ready : # if everything is setup, launch replaceAll_WSL in parallele on the environnement in wsl. Launch in parallele to not block slicer
+                    process = threading.Thread(target=self.process_wsl, args=(param,))
+                    process.start()
+                    self.onProcessStarted()
+                    
+                    start_time = time.time()
+                    previous_time = start_time
+                    current_time = start_time
+                    # self.ui.PredScanLabel.setText(f"Files in process")
+                    # self.ui.TimerLabel.setText(f"time: {current_time-start_time:.2f}s")
+                    while process.is_alive():
+                        slicer.app.processEvents()
+                        current_time = time.time()
+                        if current_time - previous_time > 0.3 :
+                            previous_time = current_time
+                            # self.ui.TimerLabel.setText(f"time: {current_time-start_time:.2f}s")
+                            # Progress bar display
+                            if os.path.isfile(self.log_path):
+                                time_progress = os.path.getmtime(self.log_path)
+                                if time_progress != self.time_log and self.progress <= self.nbFiles:
+                                    self.time_log = time_progress
+                                    self.progress += 1
+                                    progressbar_value = round((self.progress-1) / self.nbFiles * 100, 2)
+
+                                    if progressbar_value < 100:
+                                        self.ui.progressBar.setValue(progressbar_value)
+                                        self.ui.progressBar.setFormat(str(progressbar_value) + "%")
+                                    else:
+                                        self.ui.progressBar.setValue(100)
+                                        self.ui.progressBar.setFormat("100%")
+                                    self.ui.label_files.setText("Number of processed files: " + str(self.progress - 1) + "/" + str(self.nbFiles))
+
+                            # Time display
+                            current_time = time.time() - self.universal_time
+                            if current_time < 60:
+                                timer = f"Time: {int(current_time)}s"
+                            else:
+                                timer = f"Time: {int(current_time/60)}min {int(current_time%60)}s"
+                            self.ui.label_time.setText(timer)
+
+                            # print(self.logic.cliNode.GetOutputText())
+                    self.ui.label_success.setVisible(True)
+                    self.ui.progressBar.setValue(100)
+                    self.ui.progressBar.setFormat("100%")
+                    self.ui.label_files.setText("Number of processed files: " + str(self.nbFiles) + "/" + str(self.nbFiles))
+
+        else:
+            if self._checkIO():
+                # If additional output volume is selected then result with inverted threshold is written there
+                # self.logic.process(self.ui.inputSelector.currentNode(), self.ui.invertedOutputSelector.currentNode(),
+                #                 self.ui.imageThresholdSliderWidget.value, not self.ui.invertOutputCheckBox.checked, showResult=False)
+                
+                self.logic = replaceAllLogic(param,)
+                self.logic.process()
+                self.addObserver(self.logic.cliNode, vtk.vtkCommand.ModifiedEvent, self.onProcessUpdate)
+                self.onProcessStarted()
+
+    def condaCreateEnv(self,name,python_version,list_lib=[],tempo_file="tempo.txt",writeProgress=False):
+        '''
+        Creates a new Conda environment with the given name and Python version, and installs specified libraries.
+        '''
+        user = self.getUser()
+        conda_path = self.getCondaExecutable()
+        command_to_execute = ["wsl", "--user", user,"--","bash","-c", f"{conda_path} create -y -n {name} python={python_version} pip numpy-base"]
+        if writeProgress : self.writeFile(tempo_file,"20")
+        print("command to execute : ",command_to_execute)
+        result = subprocess.run(command_to_execute, text=True,stdout=subprocess.PIPE, stderr=subprocess.PIPE,env = slicer.util.startupEnvironment())
+        if result.returncode==0:
+            print("tt vas bien")
+            self.condaInstallLibEnv(name,list_lib)
+        else :
+            print("error : ",result.stderr)
+
+        if writeProgress : self.writeFile(tempo_file,"100")
+        if writeProgress : self.writeFile(tempo_file,"end")
+
+    def condaInstallLibEnv(self,name,requirements: list[str]):
+        '''
+        Installs a list of libraries in a specified Conda environment.
+        '''
+        print("requirements : ",requirements)
+        path_activate = self.getActivateExecutable()
+        path_conda = self.getCondaPath()
+        user = self.getUser()
+        if path_activate=="None":
+                return "Path to conda no setup"
+        else :
+            if len(requirements)!=0 :
+
+                command = f"source {path_activate} {name} && pip install"
+
+                for lib in requirements :
+                    command = command+ " "+lib
+                command_to_execute = ["wsl", "--user", user,"--","bash","-c", command]
+                print("command to execute in intsallLib wsl : ",command_to_execute)
+                result = subprocess.run(command_to_execute, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True, encoding='utf-8', errors='replace', env=slicer.util.startupEnvironment())
+                if result.returncode==0:
+                    print(f"Result : {result.stdout}")
+                    return (f"Result : {result.stdout}")
+                else :
+                    print(f"Error : {result.stderr}")
+                    return (f"Error : {result.stderr}")
+            return "Nothing to install"
+
+    def windows_to_linux_path(self,windows_path):
+      '''
+      convert a windows path to a wsl path
+      '''
+      windows_path = windows_path.strip()
+
+      path = windows_path.replace('\\', '/')
+
+      if ':' in path:
+        drive, path_without_drive = path.split(':', 1)
+        path = "/mnt/" + drive.lower() + path_without_drive
+
+      return path
+
+    def check_pythonpath_windows(self,name_env,file):
+      conda_exe = self.conda_wsl.getCondaExecutable()
+      command = [conda_exe, "run", "-n", name_env, "python" ,"-c", f"\"import {file} as check;import os; print(os.path.isfile(check.__file__))\""]
+      print("command : ",command)
+      result = self.conda_wsl.condaRunCommand(command)
+      print("result = ",result)
+      if "True" in result :
+        return True
+      return False
+
+    def give_pythonpath_windows(self,name_env):
+      paths = slicer.app.moduleManager().factoryManager().searchPaths
+      mnt_paths = []
+      for path in paths :
+          mnt_paths.append(f"\"{self.windows_to_linux_path(path)}\"")
+      pythonpath_arg = 'PYTHONPATH=' + ':'.join(mnt_paths)
+      conda_exe = self.conda_wsl.getCondaExecutable()
+      # print("Conda_exe : ",conda_exe)
+      argument = [conda_exe, 'env', 'config', 'vars', 'set', '-n', name_env, pythonpath_arg]
+      print("arguments : ",argument)
+      self.conda_wsl.condaRunCommand(argument)
+
+    def process_wsl(self,param):
+      ''' 
+      Function to launch replaceAll_wsl.
+      Launch requirement.py in the environnement to be sure every librairy are well install with the good version
+      Convert all the windows path to wsl path before launching the code
+      '''
+      name_env = "replaceAll"
+      result_pythonpath = self.check_pythonpath_windows(name_env,"replaceAll_utils.replaceAll_WSL")
+      if not result_pythonpath : 
+        self.give_pythonpath_windows(name_env)
+        result_pythonpath = self.check_pythonpath_windows(name_env,"replaceAll_utils.replaceAll_WSL")
+      
+      if result_pythonpath:
+        param["input_folder"] = self.windows_to_linux_path(param["input_folder"])
+        param["output_folder"] = self.windows_to_linux_path(param["output_folder"])
+        param["log_path"] = self.windows_to_linux_path(param["log_path"])
+        print("param : ",param)
+        conda_exe = self.conda_wsl.getCondaExecutable()
+        command = [conda_exe, "run", "-n", name_env, "python" ,"-m", f"replaceAll_utils.replaceAll_WSL"]
+        for key,value in param.items() :
+            command.append("\""+str(value)+"\"")
+              
+        print("command : ",command)
+
+        result = self.conda_wsl.condaRunCommand(command)
+        
+        print("RESULT DE ALI IOS WSL : ",result)
+
+    def creation_env_wsl(self):
+      '''
+      Create the environnement on wsl to run landmarks identification of ios files
+      '''
+      librairies = ["torch torchvision torchaudio --extra-index-url https://download.pytorch.org/whl/cu113",
+                    "monai==0.7.0",
+                    "--no-cache-dir torch==1.11.0+cu113 torchvision==0.12.0+cu113 torchaudio==0.11.0+cu113 --extra-index-url https://download.pytorch.org/whl/cu113",
+                    "fvcore==0.1.5.post20220305",
+                    "--no-index --no-cache-dir pytorch3d -f https://dl.fbaipublicfiles.com/pytorch3d/packaging/wheels/py39_cu113_pyt1110/download.html",
+                    "rpyc",
+                    "vtk",
+                    "scipy"]
+      
+      name_env = "replaceAll"
+      self.conda_wsl.condaCreateEnv(name_env,'3.9')
+      result_pythonpath = self.check_pythonpath_windows(name_env,"replaceAll_utils.requirement")
+      print("result_pythonpath : ",result_pythonpath)
+      if not result_pythonpath : 
+        self.give_pythonpath_windows(name_env)
+        # result_pythonpath = self.check_pythonpath_windows(name_env,"replaceAll_utils.requirement") # THIS LINE IS WORKING
+        result_pythonpath = self.check_pythonpath_windows(name_env,"replaceAll_utils.requirement")
+        print("result_pythonpath : ",result_pythonpath)
+        
+      if result_pythonpath : 
+        conda_exe = self.conda_wsl.getCondaExecutable()
+        path_pip = self.conda_wsl.getCondaPath()+f"/envs/{name_env}/bin/pip"
+        # command = [conda_exe, "run", "-n", name_env, "python" ,"-m", f"replaceAll_utils.requirement",path_pip] # THIS LINE IS WORKING
+        command = [conda_exe, "run", "-n", name_env, "python" ,"-m", f"replaceAll_utils.requirement",path_pip]
+        print("command : ",command)
+        
+        result = self.conda_wsl.condaRunCommand(command)
+      
+        print("RESULT OF REPLACEALL WSL REQUIREMENT : ",result)
+        
+        # for lib in librairies :
+        #       self.conda_wsl.condaInstallLibEnv('replaceAll',[lib])
+
+    def check_lib_wsl(self)->bool:
+        '''
+        Check if wsl contains the require librairies
+        '''
+        result1 = subprocess.run("wsl -- bash -c \"dpkg -l | grep libxrender1\"", capture_output=True, text=True)
+        output1 = result1.stdout.encode('utf-16-le').decode('utf-8')
+        clean_output1 = output1.replace('\x00', '')
+
+        result2 = subprocess.run("wsl -- bash -c \"dpkg -l | grep libgl1-mesa-glx\"", capture_output=True, text=True)
+        output2 = result2.stdout.encode('utf-16-le').decode('utf-8')
+        clean_output2 = output2.replace('\x00', '')
+
+        return "libxrender1" in clean_output1 and "libgl1-mesa-glx" in clean_output2
 
     def onProcessStarted(self):
         self.ui.label_time.setVisible(True)

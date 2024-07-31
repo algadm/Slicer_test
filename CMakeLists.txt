@@ -10,7 +10,9 @@ set(EXTENSION_CONTRIBUTORS "Alban (UMICH)")
 set(EXTENSION_DESCRIPTION "This is an example of a simple extension")
 set(EXTENSION_ICONURL "https://www.example.com/Slicer/Extensions/Replacor.png")
 set(EXTENSION_SCREENSHOTURLS "https://www.example.com/Slicer/Extensions/Replacor/Screenshots/1.png")
-set(EXTENSION_DEPENDS "NA") # Specified as a list or "NA" if no dependencies
+set(EXTENSION_DEPENDS
+    SlicerDentalModelSeg
+    SlicerConda)
 
 #-----------------------------------------------------------------------------
 # Extension dependencies
